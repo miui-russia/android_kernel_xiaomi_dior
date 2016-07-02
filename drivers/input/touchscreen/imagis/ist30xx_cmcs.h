@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2010, Imagis Technology Co. Ltd. All Rights Reserved.
+ *  Copyright (C) 2010,Imagis Technology Co. Ltd. All Rights Reserved.
  *  Copyright (C) 2015 XiaoMi, Inc.
  *
  *  This program is free software; you can redistribute it and/or modify
