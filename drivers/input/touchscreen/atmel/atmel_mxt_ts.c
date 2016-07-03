@@ -29,20 +29,9 @@
 #include <linux/of_gpio.h>
 #include <linux/kthread.h>
 #include <linux/interrupt.h>
-#include <mach/gpiomux.h>
-#ifdef CONFIG_FB
-#include <linux/notifier.h>
-#include <linux/fb.h>
-#endif
 
 #if defined(CONFIG_MXT_PLUGIN_SUPPORT)
 #include "plug.h"
-#endif
-
-#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
-#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
-#include <linux/input/doubletap2wake.h>
-#endif
 #endif
 
 /* Version */
@@ -626,10 +615,6 @@ struct mxt_data {
 #define MXT_EVENT_EXTERN 2
 #define MXT_EVENT_IRQ_FLAG 5
 	unsigned long busy;
-#endif
-
-#ifdef CONFIG_FB
-	struct notifier_block fb_notif;
 #endif
 
 #if defined(CONFIG_MXT_PLUGIN_SUPPORT)
@@ -4211,19 +4196,7 @@ static int mxt_input_enable(struct input_dev *in_dev)
 {
 	int error = 0;
 	struct mxt_data *ts = input_get_drvdata(in_dev);
-#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
-	bool prevent_sleep = false;
-	struct i2c_client *client = to_i2c_client(&ts->client->dev);
-#if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
-	prevent_sleep = (dt2w_switch > 0);
-#endif
-#endif
 
-#if defined(CONFIG_TOUCHSCREEN_PREVENT_SLEEP)
-	if (prevent_sleep)
-		disable_irq_wake(client->irq);
-	else
-#endif
 	error = mxt_resume(&ts->client->dev);
 	if (error)
 		dev_err(&ts->client->dev, "%s: failed\n", __func__);
@@ -4235,68 +4208,13 @@ static int mxt_input_disable(struct input_dev *in_dev)
 {
 	int error = 0;
 	struct mxt_data *ts = input_get_drvdata(in_dev);
-#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
-	bool prevent_sleep = false;
-	struct i2c_client *client = to_i2c_client(&ts->client->dev);
-#if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
-	prevent_sleep = (dt2w_switch > 0);
-#endif
-#endif
 
-#if defined(CONFIG_TOUCHSCREEN_PREVENT_SLEEP)
-	if (prevent_sleep)
-		enable_irq_wake(client->irq);
-	else
-#endif
 	error = mxt_suspend(&ts->client->dev);
 	if (error)
 		dev_err(&ts->client->dev, "%s: failed\n", __func__);
 
 	return error;
 }
-
-#ifdef CONFIG_FB
-static int fb_notifier_cb(struct notifier_block *self,
-			unsigned long event, void *data)
-{
-	struct fb_event *evdata = data;
-	int *blank;
-	struct mxt_data *mxt_data =
-		container_of(self, struct mxt_data, fb_notif);
-
-	if (evdata && evdata->data && event == FB_EVENT_BLANK && mxt_data) {
-		blank = evdata->data;
-		if (*blank == FB_BLANK_UNBLANK) {
-			dev_info(&mxt_data->client->dev, "##### UNBLANK SCREEN #####\n");
-			mxt_input_enable(mxt_data->input_dev);
-		} else if (*blank == FB_BLANK_POWERDOWN) {
-			dev_info(&mxt_data->client->dev, "##### BLANK SCREEN #####\n");
-			mxt_input_disable(mxt_data->input_dev);
-		}
-	}
-
-	return 0;
-}
-
-static void configure_sleep(struct mxt_data *data)
-{
-	int ret;
-
-	data->fb_notif.notifier_call = fb_notifier_cb;
-	ret = fb_register_client(&data->fb_notif);
-	if (ret) {
-		dev_err(&data->client->dev,
-			"Unable to register fb_notifier, err: %d\n", ret);
-	}
-}
-#else
-static void configure_sleep(struct mxt_data *data)
-{
-	data->input_dev->enable = mxt_input_enable;
-	data->input_dev->disable = mxt_input_disable;
-	data->input_dev->enabled = true;
-}
-#endif
 
 static int mxt_initialize_input_device(struct mxt_data *data)
 {
@@ -4324,6 +4242,9 @@ static int mxt_initialize_input_device(struct mxt_data *data)
 	input_dev->dev.parent = dev;
 	input_dev->open = mxt_input_open;
 	input_dev->close = mxt_input_close;
+	input_dev->enable = mxt_input_enable;
+	input_dev->disable = mxt_input_disable;
+	input_dev->enabled = true;
 
 	__set_bit(EV_ABS, input_dev->evbit);
 	__set_bit(EV_KEY, input_dev->evbit);
@@ -4396,8 +4317,6 @@ static int mxt_initialize_input_device(struct mxt_data *data)
 	}
 
 	data->input_dev = input_dev;
-
-	configure_sleep(data);
 
 	return 0;
 }
@@ -4798,12 +4717,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 #endif
 #else
 	error = request_threaded_irq(client->irq, NULL, mxt_interrupt,
-#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
-			pdata->irqflags | IRQF_NO_SUSPEND, client->dev.driver->name, data);
-#else
 			pdata->irqflags, client->dev.driver->name, data);
-#endif
-
 	if (error) {
 		dev_err(&client->dev, "Error %d registering irq\n", error);
 		goto err_free_input_device;
