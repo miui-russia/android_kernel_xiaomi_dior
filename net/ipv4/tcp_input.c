@@ -68,7 +68,6 @@
 #include <linux/module.h>
 #include <linux/sysctl.h>
 #include <linux/kernel.h>
-#include <linux/reciprocal_div.h>
 #include <net/dst.h>
 #include <net/tcp.h>
 #include <net/inet_common.h>
@@ -88,9 +87,6 @@ int sysctl_tcp_dsack __read_mostly = 1;
 int sysctl_tcp_app_win __read_mostly = 31;
 int sysctl_tcp_adv_win_scale __read_mostly = 1;
 EXPORT_SYMBOL(sysctl_tcp_adv_win_scale);
-
-/* rfc5961 challenge ack rate limiting */
-int sysctl_tcp_challenge_ack_limit = 1000;
 
 int sysctl_tcp_stdurg __read_mostly;
 int sysctl_tcp_rfc1337 __read_mostly;
@@ -3684,31 +3680,6 @@ static int tcp_process_frto(struct sock *sk, int flag)
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPSPURIOUSRTOS);
 	}
 	return 0;
-}
-
-/* RFC 5961 7 [ACK Throttling] */
-static void tcp_send_challenge_ack(struct sock *sk)
-{
-	/* unprotected vars, we dont care of overwrites */
-	static u32 challenge_timestamp;
-	static unsigned int challenge_count;
-	u32 now = jiffies / HZ;
-	u32 count;
-
-	if (now != challenge_timestamp) {
-		u32 half = (sysctl_tcp_challenge_ack_limit + 1) >> 1;
-
-		challenge_timestamp = now;
-		ACCESS_ONCE(challenge_count) = half +
-				reciprocal_divide(random32(),
-					sysctl_tcp_challenge_ack_limit);
-	}
-	count = ACCESS_ONCE(challenge_count);
-	if (count > 0) {
-		ACCESS_ONCE(challenge_count) = count - 1;
-		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPCHALLENGEACK);
-		tcp_send_ack(sk);
-	}
 }
 
 /* This routine deals with incoming acks, but not outgoing ones. */
